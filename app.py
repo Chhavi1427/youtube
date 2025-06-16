@@ -1,46 +1,37 @@
-import streamlit as st
+import gradio as gr
 from youtube_transcript_api import YouTubeTranscriptApi
-from transformers import pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-# Summarizer pipeline from Hugging Face (uses BART or T5)
-summarizer = pipeline("summarization")
+# Load Gemini 1.5 (fine-tuned instruction model from Hugging Face)
+model_id = "google/gemma-1.5-2b-it"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id)
+generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
-st.title("🎬 YouTube Video Summarizer")
+# Extract video ID and transcript
+def get_transcript(youtube_url):
+    try:
+        video_id = youtube_url.split("v=")[-1].split("&")[0]
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        full_text = " ".join([segment["text"] for segment in transcript])
+        return full_text[:4000]  # keep it short for generation
+    except Exception as e:
+        return f"Error: {e}"
 
-url = st.text_input("Enter YouTube Video URL (e.g., https://www.youtube.com/watch?v=abc123):")
+# Summarize
+def summarize_video(url):
+    transcript = get_transcript(url)
+    if transcript.startswith("Error:"):
+        return transcript
+    prompt = f"Summarize this video transcript:\n{transcript}\n\nSummary:"
+    summary = generator(prompt, max_length=256, do_sample=False)[0]["generated_text"]
+    return summary[len(prompt):].strip()
 
-def get_video_id(url):
-    if "v=" in url:
-        return url.split("v=")[1].split("&")[0]
-    elif "youtu.be/" in url:
-        return url.split("youtu.be/")[1].split("?")[0]
-    return None
-
-def get_transcript(video_id):
-    transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
-    transcript = " ".join([d['text'] for d in transcript_list])
-    return transcript
-
-if st.button("Generate Summary"):
-    video_id = get_video_id(url)
-    if not video_id:
-        st.error("Invalid YouTube URL.")
-    else:
-        try:
-            transcript = get_transcript(video_id)
-            st.subheader("📝 Video Transcript")
-            st.write(transcript[:2000] + "...")
-
-            # Summarize in chunks (for large inputs)
-            max_chunk = 1000
-            chunks = [transcript[i:i+max_chunk] for i in range(0, len(transcript), max_chunk)]
-            summary = ""
-            for chunk in chunks:
-                summary_text = summarizer(chunk, max_length=150, min_length=40, do_sample=False)[0]['summary_text']
-                summary += summary_text + " "
-
-            st.subheader("✅ Summary")
-            st.write(summary)
-
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+# Gradio UI
+gr.Interface(
+    fn=summarize_video,
+    inputs=gr.Textbox(label="YouTube Video URL"),
+    outputs=gr.Textbox(label="Video Summary"),
+    title="YouTube Video Summarizer (Gemini Flash 1.5)",
+    description="Enter a YouTube video link and get a summary using Gemini Flash 1.5 model hosted on Hugging Face."
+).launch()
