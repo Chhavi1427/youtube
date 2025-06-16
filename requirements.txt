@@ -2,4 +2,3 @@ streamlit
 youtube-transcript-api
 transformers
 torch
-sentencepiece
