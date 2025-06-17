@@ -1,12 +1,13 @@
 import gradio as gr
 from youtube_transcript_api import YouTubeTranscriptApi
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
-# Load the Gemini 1.5 (Gemma 2B Instruct) model
-model_id = "google/gemma-1.5-2b-it"
+model_id = "google/flan-t5-small"  # ✅ public model
+
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(model_id)
-generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+generator = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
+
 
 # Function to extract transcript from YouTube video
 def get_transcript(youtube_url):
@@ -29,11 +30,10 @@ def summarize_video(url):
     transcript = get_transcript(url)
     if transcript.startswith("Error:"):
         return transcript
-
-    prompt = f"Summarize this YouTube video transcript:\n{transcript}\n\nSummary:"
-    result = generator(prompt, max_length=512, do_sample=False, truncation=True)[0]["generated_text"]
-    summary = result.replace(prompt, "").strip()
+    prompt = f"Summarize this video transcript:\n{transcript}"
+    summary = generator(prompt, max_length=200)[0]['generated_text']
     return summary
+
 
 # Gradio app
 gr.Interface(
