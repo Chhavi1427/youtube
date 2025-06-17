@@ -1,39 +1,52 @@
-import gradio as gr
+import streamlit as st
 from youtube_transcript_api import YouTubeTranscriptApi
-from transformers import pipeline
-import os
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import torch
 
-# Load summarization pipeline using a small, efficient public model
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+# Set Streamlit page config
+st.set_page_config(page_title="YouTube Video Summarizer", layout="centered")
 
-# Extract transcript from YouTube
-def get_transcript(url):
-    try:
-        video_id = url.split("v=")[-1].split("&")[0]
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        return " ".join([segment["text"] for segment in transcript])
-    except Exception as e:
-        return f"Error: {str(e)}"
+st.title("🎬 YouTube Video Bullet Point Summarizer")
 
-# Summarization function
-def summarize_video(url):
-    transcript = get_transcript(url)
-    if transcript.startswith("Error:"):
-        return transcript
-    shortened_text = transcript[:1024]  # Max token length for this model
-    summary = summarizer(shortened_text, max_length=130, min_length=30, do_sample=False)
-    return summary[0]["summary_text"]
+# Hugging Face summarization model
+model_id = "google/flan-t5-small"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
-# Gradio UI
-iface = gr.Interface(
-    fn=summarize_video,
-    inputs=gr.Textbox(label="YouTube Video URL"),
-    outputs=gr.Textbox(label="Video Summary"),
-    title="📺 YouTube Summarizer App",
-    description="Paste a YouTube link and get a concise summary using a Transformer model."
-)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 
-# Launch with port binding (for Render/Netlify backend-compatible platforms)
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))
-    iface.launch(server_name="0.0.0.0", server_port=port)
+# Extract YouTube video ID
+def extract_video_id(url):
+    import re
+    match = re.search(r"(?:v=|youtu\.be/)([^&]+)", url)
+    return match.group(1) if match else None
+
+# Summarize transcript text into bullet points
+def summarize_text(text):
+    prompt = "Summarize the following into concise bullet points:\n\n" + text
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True).input_ids.to(device)
+    outputs = model.generate(inputs, max_length=250, min_length=50, do_sample=False)
+    summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return summary
+
+# Streamlit input
+video_url = st.text_input("Enter YouTube Video URL")
+
+if video_url:
+    video_id = extract_video_id(video_url)
+    if video_id:
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            full_text = " ".join([entry['text'] for entry in transcript])
+            st.info("Generating summary... This may take a few seconds.")
+            summary = summarize_text(full_text)
+
+            st.success("✅ Summary:")
+            for bullet in summary.split("\n"):
+                if bullet.strip():
+                    st.markdown(f"- {bullet.strip()}")
+        except Exception as e:
+            st.error(f"⚠️ Could not fetch transcript: {e}")
+    else:
+        st.error("❌ Invalid YouTube URL format.")
