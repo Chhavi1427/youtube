@@ -1,4 +1,4 @@
-gradio
+streamlit
 transformers
 torch
 youtube-transcript-api
